@@ -1,5 +1,6 @@
 import json
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
@@ -91,6 +92,20 @@ def register_user(
         },
     )
 
+
+def login_user(
+    client,
+    *,
+    username="admin_test",
+    password="TestPassword123",
+):
+    return client.post(
+        "/auth/token",
+        data={
+            "username": username,
+            "password": password,
+        },
+    )
 
 def test_create_passenger_success(client):
     response = create_passenger(client)
@@ -469,3 +484,71 @@ def test_registration_stores_password_hash(client):
             plain_password,
             user.hashed_password,
         )
+
+
+def test_login_success_returns_jwt(client):
+    register_response = register_user(
+        client,
+        username="login_user",
+        password="LoginPassword123",
+    )
+    assert register_response.status_code == 201
+
+    login_response = login_user(
+        client,
+        username="login_user",
+        password="LoginPassword123",
+    )
+
+    assert login_response.status_code == 200
+
+    body = login_response.json()
+    assert body["token_type"] == "bearer"
+    assert isinstance(body["access_token"], str)
+    assert body["access_token"]
+
+    payload = jwt.decode(
+        body["access_token"],
+        settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+    )
+
+    assert payload["sub"] == "login_user"
+    assert "iat" in payload
+    assert "exp" in payload
+
+
+def test_login_wrong_password_returns_401(client):
+    register_user(
+        client,
+        username="wrong_password_user",
+        password="CorrectPassword123",
+    )
+
+    response = login_user(
+        client,
+        username="wrong_password_user",
+        password="WrongPassword123",
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "用户名或密码错误",
+        "data": None,
+    }
+
+
+def test_login_unknown_user_returns_401(client):
+    response = login_user(
+        client,
+        username="missing_user",
+        password="SomePassword123",
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "用户名或密码错误",
+        "data": None,
+    }
