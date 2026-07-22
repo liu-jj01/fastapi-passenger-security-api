@@ -3,8 +3,7 @@ from fastapi import FastAPI
 from app.config import settings
 from app.exception_handlers import register_exception_handlers
 from app.request_logging import register_request_logging
-from app.routers import airport, passenger
-
+from app.routers import airport, auth, passenger
 
 app = FastAPI(title=settings.app_name)
 
@@ -12,6 +11,7 @@ register_exception_handlers(app)
 register_request_logging(app)
 
 app.include_router(airport.router)
+app.include_router(auth.router)
 app.include_router(passenger.router)
 
 @app.get("/health", tags=["系统"])

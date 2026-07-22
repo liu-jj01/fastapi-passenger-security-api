@@ -2,11 +2,13 @@ import json
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app import database
+from app.auth import verify_password
 from app.config import settings
 from app.main import app
-
+from app.models import User
 
 @pytest.fixture(autouse=True)
 def use_temporary_database(tmp_path):
@@ -73,6 +75,20 @@ def create_passenger(client, **kwargs):
     return client.post(
         "/security/passenger",
         json=make_request_body(**kwargs),
+    )
+
+def register_user(
+    client,
+    *,
+    username="admin_test",
+    password="TestPassword123",
+):
+    return client.post(
+        "/auth/register",
+        json={
+            "username": username,
+            "password": password,
+        },
     )
 
 
@@ -344,3 +360,112 @@ def test_invalid_api_key_returns_403():
         "message": "API Key 不正确",
         "data": None,
     }
+
+
+
+def test_register_user_success_without_api_key():
+    with TestClient(app) as public_client:
+        response = register_user(public_client)
+
+    assert response.status_code == 201
+
+    body = response.json()
+    assert body["code"] == "0000"
+    assert body["message"] == "用户注册成功"
+    assert body["data"]["username"] == "admin_test"
+    assert body["data"]["is_active"] is True
+    assert isinstance(body["data"]["id"], int)
+    assert body["data"]["created_at"]
+
+
+def test_register_response_hides_password_fields(client):
+    response = register_user(
+        client,
+        username="safe_response_user",
+    )
+
+    assert response.status_code == 201
+
+    user_data = response.json()["data"]
+    assert "password" not in user_data
+    assert "hashed_password" not in user_data
+
+
+def test_duplicate_username_returns_409(client):
+    first_response = register_user(
+        client,
+        username="duplicate_user",
+    )
+    second_response = register_user(
+        client,
+        username="duplicate_user",
+    )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 409
+    assert second_response.json() == {
+        "code": "4009",
+        "message": "用户名已经存在",
+        "data": None,
+    }
+
+
+def test_short_registration_password_returns_422(client):
+    response = register_user(
+        client,
+        username="short_password_user",
+        password="1234567",
+    )
+
+    assert response.status_code == 422
+
+    body = response.json()
+    assert body["code"] == "4220"
+    assert body["message"] == "请求参数校验失败"
+    assert any(
+        "密码长度不能少于 8 位" in error["msg"]
+        for error in body["data"]
+    )
+
+
+def test_invalid_registration_username_returns_422(client):
+    response = register_user(
+        client,
+        username="ab",
+    )
+
+    assert response.status_code == 422
+
+    body = response.json()
+    assert body["code"] == "4220"
+    assert any(
+        "用户名只能包含英文字母、数字和下划线" in error["msg"]
+        for error in body["data"]
+    )
+
+
+def test_registration_stores_password_hash(client):
+    plain_password = "SecurePassword123"
+
+    response = register_user(
+        client,
+        username="password_hash_user",
+        password=plain_password,
+    )
+
+    assert response.status_code == 201
+
+    with database.SessionLocal() as session:
+        user = session.scalar(
+            select(User).where(
+                User.username == "password_hash_user"
+            )
+        )
+
+        assert user is not None
+        assert user.hashed_password != plain_password
+        assert user.hashed_password.startswith("$argon2")
+        assert verify_password(
+            plain_password,
+            user.hashed_password,
+        )
