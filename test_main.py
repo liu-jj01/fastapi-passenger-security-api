@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app import database
-from app.auth import verify_password
+from app.auth import create_access_token, verify_password
 from app.config import settings
 from app.main import app
 from app.models import User
@@ -550,5 +550,83 @@ def test_login_unknown_user_returns_401(client):
     assert response.json() == {
         "code": "4001",
         "message": "用户名或密码错误",
+        "data": None,
+    }
+
+
+def test_get_current_user_success(client):
+    register_user(
+        client,
+        username="current_user",
+        password="CurrentPassword123",
+    )
+
+    login_response = login_user(
+        client,
+        username="current_user",
+        password="CurrentPassword123",
+    )
+    access_token = login_response.json()["access_token"]
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["code"] == "0000"
+    assert body["message"] == "获取当前用户成功"
+    assert body["data"]["username"] == "current_user"
+    assert body["data"]["is_active"] is True
+    assert "password" not in body["data"]
+    assert "hashed_password" not in body["data"]
+
+
+def test_get_current_user_without_token_returns_401():
+    with TestClient(app) as public_client:
+        response = public_client.get("/auth/me")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "缺少 Bearer Token",
+        "data": None,
+    }
+
+
+def test_get_current_user_with_invalid_token_returns_401(client):
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": "Bearer invalid-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "无效或已过期的访问令牌",
+        "data": None,
+    }
+
+
+def test_token_for_missing_user_returns_401(client):
+    access_token = create_access_token("missing_token_user")
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "无效或已过期的访问令牌",
         "data": None,
     }

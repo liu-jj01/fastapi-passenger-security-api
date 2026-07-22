@@ -6,7 +6,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.auth import create_access_token, hash_password, verify_password
+from app.auth import (
+    create_access_token,
+    get_current_user,
+    hash_password,
+    verify_password,
+)
 from app.database import get_session
 from app.models import User
 from app.schemas import TokenResponse, UserCreate, UserResponse
@@ -106,3 +111,20 @@ def login_for_access_token(
         access_token=access_token,
         token_type="bearer",
     )
+
+@router.get("/me")
+def get_my_profile(
+    current_user: Annotated[
+        User,
+        Depends(get_current_user),
+    ],
+):
+    user_data = UserResponse.model_validate(
+        current_user
+    ).model_dump(mode="json")
+
+    return {
+        "code": "0000",
+        "message": "获取当前用户成功",
+        "data": user_data,
+    }
