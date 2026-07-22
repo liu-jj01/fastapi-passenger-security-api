@@ -14,10 +14,13 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
-    env:
+   env:
       APP_NAME: "FastAPI Passenger Security API CI"
       DATABASE_URL: "sqlite:///./test_passenger.db"
       API_KEY: "ci-test-api-key"
+      JWT_SECRET_KEY: "ci-only-test-jwt-secret"
+      JWT_ALGORITHM: "HS256"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "30"
 
     steps:
       - name: Checkout repository
