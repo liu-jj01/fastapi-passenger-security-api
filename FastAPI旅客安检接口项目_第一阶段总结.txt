@@ -1,0 +1,138 @@
+FastAPI旅客安检接口项目 - 第一阶段总结
+
+一、阶段目标
+从零搭建一套可运行、可维护、可测试的旅客安检信息接口系统，并逐步将最初的单文件练习代码升级为结构较完整的小型后端项目。
+
+二、已实现的核心功能
+1. 旅客信息CRUD
+- POST /security/passenger：新增旅客安检信息
+- GET /security/passenger：按证件号、航班号、航班日期精确查询
+- PUT /security/passenger：更新座位号、安检结果、行李状态、备注等信息
+- DELETE /security/passenger：删除指定旅客航班记录
+- GET /security/passengers：分页查询旅客列表
+
+2. 数据唯一性与持久化
+- 使用 certNo + fltNo + fltDate 作为业务唯一条件
+- 通过联合唯一约束拦截重复提交，并返回 409
+- 数据由内存列表升级为 SQLite 持久化存储
+- 最终使用 SQLAlchemy 2.x ORM 操作数据库
+
+3. 列表查询能力
+- 支持分页：page、pageSize
+- 支持按证件号、航班号、航班日期筛选
+- 支持按旅客姓名模糊查询
+- 支持按 ID 或创建时间升序、降序排列
+- 返回 list、page、pageSize、total、totalPages
+
+4. 参数与数据校验
+- 航班号仅允许字母和数字，并自动转为大写
+- 航班日期必须为 YYYY-MM-DD，且必须是真实日期
+- 座位号格式类似 12A、16B、108C
+- 必填字段不能是空字符串
+- 备注最多 200 个字符，可新增、修改和清空
+- 非法请求在写入数据库前被拦截
+
+5. 统一响应与异常处理
+成功和失败统一返回：
+{
+  "code": "业务码",
+  "message": "处理结果",
+  "data": null
+}
+
+已覆盖常见状态：
+- 400：业务参数错误
+- 401：缺少 API Key
+- 403：API Key 错误
+- 404：数据不存在
+- 409：重复数据
+- 422：请求参数校验失败
+
+6. API Key 鉴权
+- 旅客安检接口统一要求请求头 X-API-Key
+- 不传密钥返回 401
+- 密钥错误返回 403
+- 密钥正确才允许访问
+- Swagger /docs 支持 Authorize 授权测试
+
+7. 配置管理
+- 使用 pydantic-settings 读取 .env
+- APP_NAME、DATABASE_URL、API_KEY 不再写死在业务代码中
+- .env 保存真实配置，不提交 Git
+- .env.example 提供配置模板
+
+8. 数据库迁移
+- 接入 Alembic 管理数据库结构版本
+- 完成 passengers 初始表迁移
+- 将已有数据库通过 stamp 纳入迁移管理
+- 完成 remark 字段的真实升级迁移
+- 当前迁移版本：cc0c73bee5e9 (head)
+
+9. 请求日志与性能信息
+- 记录请求方法、接口路径、状态码和服务端耗时
+- 示例：GET /security/passengers status=200 duration=21.68ms
+- 响应头增加 X-Process-Time-Ms
+
+10. 自动化测试
+使用 pytest + FastAPI TestClient + 临时 SQLite 数据库，完成 14 个自动化测试，覆盖：
+- 新增、重复新增、单条查询、更新、删除
+- 日期与参数校验
+- 分页、姓名筛选、排序
+- 备注新增、查询、更新和清空
+- 缺少或错误 API Key
+
+当前测试结果：14 passed
+
+三、项目结构升级
+项目已从单个 main.py 拆分为模块化结构：
+
+api_practice/
+├─ app/
+│  ├─ routers/
+│  │  ├─ airport.py
+│  │  └─ passenger.py
+│  ├─ config.py
+│  ├─ database.py
+│  ├─ exception_handlers.py
+│  ├─ main.py
+│  ├─ models.py
+│  ├─ request_logging.py
+│  ├─ schemas.py
+│  └─ security.py
+├─ migrations/
+├─ main.py
+├─ test_main.py
+├─ alembic.ini
+├─ requirements.txt
+├─ .env
+├─ .env.example
+└─ README.md
+
+四、完整业务链路
+外部系统发送旅客安检信息
+→ API Key 鉴权
+→ 请求体解析
+→ Pydantic 参数校验
+→ SQLAlchemy 写入数据库
+→ 联合唯一约束防止重复
+→ 返回统一响应
+→ 记录状态码和处理耗时
+
+五、常用命令
+启动项目：
+cd F:\shixi\api_practice
+.\.venv\Scripts\Activate.ps1
+alembic upgrade head
+fastapi dev main.py
+
+运行测试：
+pytest -v
+
+查看数据库迁移版本：
+alembic current
+
+接口文档：
+http://127.0.0.1:8000/docs
+
+六、阶段成果
+第一阶段已经完成一套基于 FastAPI、SQLAlchemy、SQLite 和 Alembic 的旅客安检信息管理 API。系统具备数据校验、持久化、CRUD、分页筛选、统一异常、API Key 鉴权、日志、数据库迁移和自动化测试能力，已经从基础练习代码发展为结构完整、可继续扩展的小型后端项目。

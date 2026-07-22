@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+.vscode/
+
+.env
+passenger.db
+*.db
+
+*.bak
+*_old.py
+
+.DS_Store
+Thumbs.db
