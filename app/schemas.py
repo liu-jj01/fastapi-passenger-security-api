@@ -2,8 +2,7 @@ import re
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
-
+from pydantic import BaseModel, ConfigDict, field_validator
 
 class AirportRequest(BaseModel):
     code: str
@@ -161,3 +160,44 @@ class PassengerUpdate(BaseModel):
             raise ValueError("备注长度不能超过 200 个字符")
 
         return value
+
+class UserCreate(BaseModel):
+    username: str
+    password: str
+
+    @field_validator("username")
+    @classmethod
+    def validate_username(cls, value: str):
+        value = value.strip()
+
+        if not re.fullmatch(r"[A-Za-z0-9_]{3,30}", value):
+            raise ValueError(
+                "用户名只能包含英文字母、数字和下划线，长度为 3 至 30 位"
+            )
+
+        return value
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str):
+        if len(value) < 8:
+            raise ValueError("密码长度不能少于 8 位")
+
+        if len(value) > 128:
+            raise ValueError("密码长度不能超过 128 位")
+
+        return value
+
+
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    username: str
+    is_active: bool
+    created_at: datetime
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
