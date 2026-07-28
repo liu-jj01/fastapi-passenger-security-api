@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - "feature/**"
   pull_request:
     branches:
       - main
@@ -17,6 +18,9 @@ jobs:
       APP_NAME: "FastAPI Passenger Security API CI"
       DATABASE_URL: "sqlite:///./test_passenger.db"
       API_KEY: "ci-test-api-key"
+      JWT_SECRET_KEY: "ci-only-test-jwt-secret"
+      JWT_ALGORITHM: "HS256"
+      ACCESS_TOKEN_EXPIRE_MINUTES: "30"
 
     steps:
       - name: Checkout repository
@@ -32,7 +36,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest
 
       - name: Create database tables
         run: alembic upgrade head

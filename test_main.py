@@ -1,12 +1,15 @@
 import json
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app import database
+from app.auth import create_access_token, verify_password
 from app.config import settings
 from app.main import app
-
+from app.models import User
 
 @pytest.fixture(autouse=True)
 def use_temporary_database(tmp_path):
@@ -75,6 +78,34 @@ def create_passenger(client, **kwargs):
         json=make_request_body(**kwargs),
     )
 
+def register_user(
+    client,
+    *,
+    username="admin_test",
+    password="TestPassword123",
+):
+    return client.post(
+        "/auth/register",
+        json={
+            "username": username,
+            "password": password,
+        },
+    )
+
+
+def login_user(
+    client,
+    *,
+    username="admin_test",
+    password="TestPassword123",
+):
+    return client.post(
+        "/auth/token",
+        data={
+            "username": username,
+            "password": password,
+        },
+    )
 
 def test_create_passenger_success(client):
     response = create_passenger(client)
@@ -342,5 +373,260 @@ def test_invalid_api_key_returns_403():
     assert response.json() == {
         "code": "4003",
         "message": "API Key 不正确",
+        "data": None,
+    }
+
+
+
+def test_register_user_success_without_api_key():
+    with TestClient(app) as public_client:
+        response = register_user(public_client)
+
+    assert response.status_code == 201
+
+    body = response.json()
+    assert body["code"] == "0000"
+    assert body["message"] == "用户注册成功"
+    assert body["data"]["username"] == "admin_test"
+    assert body["data"]["is_active"] is True
+    assert isinstance(body["data"]["id"], int)
+    assert body["data"]["created_at"]
+
+
+def test_register_response_hides_password_fields(client):
+    response = register_user(
+        client,
+        username="safe_response_user",
+    )
+
+    assert response.status_code == 201
+
+    user_data = response.json()["data"]
+    assert "password" not in user_data
+    assert "hashed_password" not in user_data
+
+
+def test_duplicate_username_returns_409(client):
+    first_response = register_user(
+        client,
+        username="duplicate_user",
+    )
+    second_response = register_user(
+        client,
+        username="duplicate_user",
+    )
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 409
+    assert second_response.json() == {
+        "code": "4009",
+        "message": "用户名已经存在",
+        "data": None,
+    }
+
+
+def test_short_registration_password_returns_422(client):
+    response = register_user(
+        client,
+        username="short_password_user",
+        password="1234567",
+    )
+
+    assert response.status_code == 422
+
+    body = response.json()
+    assert body["code"] == "4220"
+    assert body["message"] == "请求参数校验失败"
+    assert any(
+        "密码长度不能少于 8 位" in error["msg"]
+        for error in body["data"]
+    )
+
+
+def test_invalid_registration_username_returns_422(client):
+    response = register_user(
+        client,
+        username="ab",
+    )
+
+    assert response.status_code == 422
+
+    body = response.json()
+    assert body["code"] == "4220"
+    assert any(
+        "用户名只能包含英文字母、数字和下划线" in error["msg"]
+        for error in body["data"]
+    )
+
+
+def test_registration_stores_password_hash(client):
+    plain_password = "SecurePassword123"
+
+    response = register_user(
+        client,
+        username="password_hash_user",
+        password=plain_password,
+    )
+
+    assert response.status_code == 201
+
+    with database.SessionLocal() as session:
+        user = session.scalar(
+            select(User).where(
+                User.username == "password_hash_user"
+            )
+        )
+
+        assert user is not None
+        assert user.hashed_password != plain_password
+        assert user.hashed_password.startswith("$argon2")
+        assert verify_password(
+            plain_password,
+            user.hashed_password,
+        )
+
+
+def test_login_success_returns_jwt(client):
+    register_response = register_user(
+        client,
+        username="login_user",
+        password="LoginPassword123",
+    )
+    assert register_response.status_code == 201
+
+    login_response = login_user(
+        client,
+        username="login_user",
+        password="LoginPassword123",
+    )
+
+    assert login_response.status_code == 200
+
+    body = login_response.json()
+    assert body["token_type"] == "bearer"
+    assert isinstance(body["access_token"], str)
+    assert body["access_token"]
+
+    payload = jwt.decode(
+        body["access_token"],
+        settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+    )
+
+    assert payload["sub"] == "login_user"
+    assert "iat" in payload
+    assert "exp" in payload
+
+
+def test_login_wrong_password_returns_401(client):
+    register_user(
+        client,
+        username="wrong_password_user",
+        password="CorrectPassword123",
+    )
+
+    response = login_user(
+        client,
+        username="wrong_password_user",
+        password="WrongPassword123",
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "用户名或密码错误",
+        "data": None,
+    }
+
+
+def test_login_unknown_user_returns_401(client):
+    response = login_user(
+        client,
+        username="missing_user",
+        password="SomePassword123",
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "用户名或密码错误",
+        "data": None,
+    }
+
+
+def test_get_current_user_success(client):
+    register_user(
+        client,
+        username="current_user",
+        password="CurrentPassword123",
+    )
+
+    login_response = login_user(
+        client,
+        username="current_user",
+        password="CurrentPassword123",
+    )
+    access_token = login_response.json()["access_token"]
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["code"] == "0000"
+    assert body["message"] == "获取当前用户成功"
+    assert body["data"]["username"] == "current_user"
+    assert body["data"]["is_active"] is True
+    assert "password" not in body["data"]
+    assert "hashed_password" not in body["data"]
+
+
+def test_get_current_user_without_token_returns_401():
+    with TestClient(app) as public_client:
+        response = public_client.get("/auth/me")
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "缺少 Bearer Token",
+        "data": None,
+    }
+
+
+def test_get_current_user_with_invalid_token_returns_401(client):
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": "Bearer invalid-token",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "无效或已过期的访问令牌",
+        "data": None,
+    }
+
+
+def test_token_for_missing_user_returns_401(client):
+    access_token = create_access_token("missing_token_user")
+
+    response = client.get(
+        "/auth/me",
+        headers={
+            "Authorization": f"Bearer {access_token}",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "无效或已过期的访问令牌",
         "data": None,
     }
