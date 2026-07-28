@@ -13,10 +13,15 @@ from app.models import Passenger
 from app.schemas import PassengerInfo, PassengerUpdate, SecurityMessageRequest
 from app.security import verify_api_key
 
+from app.auth import get_current_user
+
 router = APIRouter(
     prefix="/security",
     tags=["旅客安检"],
-    dependencies=[Depends(verify_api_key)],
+    dependencies=[
+        Depends(verify_api_key),
+        Depends(get_current_user),
+    ],
 )
 
 

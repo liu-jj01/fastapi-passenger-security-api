@@ -22,12 +22,34 @@ def use_temporary_database(tmp_path):
 
 @pytest.fixture
 def client():
-    with TestClient(
-        app,
-        headers={
-            "X-API-Key": settings.api_key,
-        },
-    ) as test_client:
+    with TestClient(app) as test_client:
+        register_response = test_client.post(
+            "/auth/register",
+            json={
+                "username": "fixture_user",
+                "password": "FixturePassword123",
+            },
+        )
+        assert register_response.status_code == 201
+
+        login_response = test_client.post(
+            "/auth/token",
+            data={
+                "username": "fixture_user",
+                "password": "FixturePassword123",
+            },
+        )
+        assert login_response.status_code == 200
+
+        access_token = login_response.json()["access_token"]
+
+        test_client.headers.update(
+            {
+                "X-API-Key": settings.api_key,
+                "Authorization": f"Bearer {access_token}",
+            }
+        )
+
         yield test_client
 
 
@@ -623,6 +645,45 @@ def test_token_for_missing_user_returns_401(client):
             "Authorization": f"Bearer {access_token}",
         },
     )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "无效或已过期的访问令牌",
+        "data": None,
+    }
+
+
+def test_security_endpoint_without_token_returns_401():
+    with TestClient(
+        app,
+        headers={
+            "X-API-Key": settings.api_key,
+        },
+    ) as unauthorized_client:
+        response = unauthorized_client.get(
+            "/security/passengers"
+        )
+
+    assert response.status_code == 401
+    assert response.json() == {
+        "code": "4001",
+        "message": "缺少 Bearer Token",
+        "data": None,
+    }
+
+
+def test_security_endpoint_with_invalid_token_returns_401():
+    with TestClient(
+        app,
+        headers={
+            "X-API-Key": settings.api_key,
+            "Authorization": "Bearer invalid-token",
+        },
+    ) as unauthorized_client:
+        response = unauthorized_client.get(
+            "/security/passengers"
+        )
 
     assert response.status_code == 401
     assert response.json() == {
